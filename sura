@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# Check if Azure CLI is installed
+if ! command -v az &> /dev/null; then
+    echo "Error: Azure CLI is not installed."
+    exit 1
+fi
+
+# Check if user is logged in to Azure
+if ! az account show &> /dev/null; then
+    echo "Error: Not logged in to Azure. Run 'az login' first."
+    exit 1
+fi
+
+# Path to the file containing storage account names
+file_path="$1"
+
+if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
+    echo "Error: Invalid file path. Usage: ./check_hns.sh storage_accounts.txt"
+    exit 1
+fi
+
+echo "STORAGE ACCOUNT,HNS STATUS"
+
+# List all subscriptions
+subscriptions=$(az account list --query "[].id" -o tsv)
+
+# Read each line from the file and check HNS status
+while IFS= read -r storage_account || [[ -n "$storage_account" ]]; do
+    # Skip empty lines
+    if [ -z "$storage_account" ] || [[ "$storage_account" =~ ^# ]]; then
+        continue
+    fi
+    
+    # Remove whitespace
+    storage_account=$(echo "$storage_account" | tr -d '[:space:]')
+    found=false
+    
+    # Check in each subscription
+    for subscription in $subscriptions; do
+        # Set the active subscription
+        az account set --subscription "$subscription" > /dev/null
+        
+        # Try to get resource group and HNS status
+        is_hns_enabled=$(az storage account show --name "$storage_account" --query "isHnsEnabled" -o tsv 2>/dev/null)
+        
+        if [ -n "$is_hns_enabled" ]; then
+            if [ "$is_hns_enabled" = "true" ]; then
+                echo "$storage_account,ENABLED"
+            else
+                echo "$storage_account,DISABLED"
+            fi
+            found=true
+            break
+        fi
+    done
+    
+    if [ "$found" = false ]; then
+        echo "$storage_account,NOT FOUND"
+    fi
+    
+done < "$file_path"
