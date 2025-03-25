@@ -106,29 +106,30 @@ check_storage_account() {
 # Print header
 echo "STORAGE ACCOUNT,HNS STATUS,BLOB SOFT DELETE"
 
-# Process storage accounts in parallel
-active_jobs=0
-job_pids=()
+# Function to wait until we have fewer than MAX_PARALLEL_JOBS running
+wait_for_job_slot() {
+    while true; do
+        # Count running background jobs
+        running_jobs=$(jobs -p | wc -l)
+        if [ $running_jobs -lt $MAX_PARALLEL_JOBS ]; then
+            break
+        fi
+        sleep 1
+    done
+}
 
-# Read each line from the file and check storage account properties
+# Process storage accounts in parallel
 while IFS= read -r storage_account || [[ -n "$storage_account" ]]; do
     # Skip empty lines
     if [ -z "$storage_account" ] || [[ "$storage_account" =~ ^# ]]; then
         continue
     fi
     
-    # Wait if we have reached the maximum number of parallel jobs
-    if [ $active_jobs -ge $MAX_PARALLEL_JOBS ]; then
-        # Wait for any job to finish
-        wait -n
-        active_jobs=$((active_jobs - 1))
-    fi
+    # Wait for a job slot to become available
+    wait_for_job_slot
     
     # Start a new job to check the storage account
     check_storage_account "$storage_account" &
-    job_pid=$!
-    job_pids+=($job_pid)
-    active_jobs=$((active_jobs + 1))
     
 done < "$file_path"
 
